@@ -1,0 +1,8 @@
+venv
+build
+*.json
+*.egg*
+datasets
+dataset
+*.pyc
+*.log
