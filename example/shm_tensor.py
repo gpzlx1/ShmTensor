@@ -56,7 +56,7 @@ class ShmTensor:
                                                self.shape_)
 
     @classmethod
-    def _cleanup_shm(self, name, size, ptr, fd, pin_memory):
+    def _cleanup_shm(cls, name, size, ptr, fd, pin_memory):
         capi.release_shared_mem(name, size, ptr, fd, pin_memory)
 
     @property

@@ -6,3 +6,4 @@ datasets
 dataset
 *.pyc
 *.log
+*.npy
