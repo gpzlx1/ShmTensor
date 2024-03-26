@@ -32,6 +32,10 @@ std::tuple<torch::Tensor, int64_t, int64_t, int64_t> open_mmap_tensor(
   void* ptr = mmap(NULL, file_size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
 
   //// return tensor
+  if (offset % 8 != 0) {
+    LOG(WARNING) << "offset is not multiple of 8, may cause performance issue";
+  }
+
   torch::Tensor tensor = torch::from_blob(ptr + offset, shape,
                                           torch::TensorOptions().dtype(dtype));
 
