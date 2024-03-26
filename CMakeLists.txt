@@ -41,6 +41,7 @@ find_package(pybind11 REQUIRED)
 # Define our library target
 file(GLOB ShmTensor_SRC
   src/*.cc
+  src/*.cu
 )
 
 # Set include

@@ -4,6 +4,7 @@
 #include "cnpy.h"
 #include "mmap_tensor.h"
 #include "shm_memory.h"
+#include "thrust_scan.h"
 #include "utils.h"
 using namespace shm;
 
@@ -21,5 +22,6 @@ PYBIND11_MODULE(ShmTensorLib, m) {
       .def("open_mmap_tensor", &open_mmap_tensor, py::arg("filename"),
            py::arg("pin_memory"))
       .def("close_mmap_tensor", &close_mmap_tensor, py::arg("size"),
-           py::arg("ptr"), py::arg("fd"), py::arg("pin_memory"));
+           py::arg("ptr"), py::arg("fd"), py::arg("pin_memory"))
+      .def("thrust_scan", &thrust_scan, py::arg("tensor"));
 }
