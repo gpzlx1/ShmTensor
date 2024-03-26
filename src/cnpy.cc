@@ -7,10 +7,10 @@
 namespace cnpy {
 
 std::unordered_map<std::string, torch::ScalarType> npy2torch = {
-    {"<f4", torch::kFloat32},
-    {"<f8", torch::kFloat64},
-    {"<i4", torch::kInt32},
-    {"<i8", torch::kInt64},
+    {"<f2", torch::kFloat16}, {"<f4", torch::kFloat32},
+    {"<f8", torch::kFloat64}, {"|u1", torch::kUInt8},
+    {"|i1", torch::kInt8},    {"<i2", torch::kInt16},
+    {"<i4", torch::kInt32},   {"<i8", torch::kInt64},
 };
 
 // copy from: https://github.com/rogersce/cnpy
@@ -71,7 +71,12 @@ parse_npy_header(FILE* fp) {
   std::string str_ws = header.substr(loc1 + 2);
   loc2 = str_ws.find("'");
   std::string npy_type = header.substr(loc1, loc2 + 2);
-  dtype = npy2torch[npy_type];
+  auto iter = npy2torch.find(npy_type);
+  if (iter == npy2torch.end()) {
+    std::cerr << "dtype: " << npy_type << std::endl;
+    throw std::runtime_error("parse_npy_header: failed to find dtype");
+  }
+  dtype = iter->second;
 
   // offset
   offset = ftell(fp);
@@ -93,4 +98,4 @@ torch::Tensor test_open_from_numpy(std::string fname) {
   fclose(fp);
   return torch::Tensor();
 }
-}
+}  // namespace cnpy

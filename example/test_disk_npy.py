@@ -31,6 +31,15 @@ for shape in [
     (10, 20, 30, 40),
     (100_0000, 128),
 ]:
-    for dtype in [np.int32, np.int64, np.float32, np.float64]:
+    for dtype in [
+            np.uint8,
+            np.int8,
+            np.int16,
+            np.int32,
+            np.int64,
+            np.float16,
+            np.float32,
+            np.float64,
+    ]:
         print(test.__name__, shape, dtype)
         test(shape, dtype)
