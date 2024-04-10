@@ -44,11 +44,15 @@ inline void cub_exclusiveSum(T *arrays, int64_t array_length) {
   cuda_allocator->raw_deallocate(d_temp_storage);
 }
 
-inline torch::Tensor GetSubIndptr(torch::Tensor indptr, torch::Tensor seeds,
-                                  int64_t num_pick, bool replace) {
+inline std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> GetSubIndptr(
+    torch::Tensor indptr, torch::Tensor seeds, int64_t num_pick, bool replace) {
   int64_t numel = seeds.numel();
   torch::Tensor sub_indptr =
       torch::empty((numel + 1), indptr.options().device(torch::kCUDA));
+  torch::Tensor indices_begin =
+      torch::empty(numel, indptr.options().device(torch::kCUDA));
+  torch::Tensor indices_end =
+      torch::empty(numel, indptr.options().device(torch::kCUDA));
 
   INTEGER_TYPE_SWITCH(indptr.scalar_type(), IdType, {
     INTEGER_TYPE_SWITCH(seeds.scalar_type(), IndexType, {
@@ -59,16 +63,20 @@ inline torch::Tensor GetSubIndptr(torch::Tensor indptr, torch::Tensor seeds,
       thrust::for_each(thrust::device, it(0), it(numel),
                        [in_indptr = indptr.data_ptr<IdType>(),
                         index = seeds.data_ptr<IndexType>(),
-                        out = thrust::raw_pointer_cast(item_prefix), replace,
+                        out = thrust::raw_pointer_cast(item_prefix),
+                        begin_ptr = indices_begin.data_ptr<IdType>(),
+                        end_ptr = indices_end.data_ptr<IdType>(), replace,
                         num_pick] __device__(int i) mutable {
                          IdType row = index[i];
                          IdType begin = in_indptr[row];
                          IdType end = in_indptr[row + 1];
+                         IdType deg = end - begin;
+                         begin_ptr[i] = begin;
+                         end_ptr[i] = end;
                          if (replace) {
-                           out[i] = (end - begin) == 0 ? 0 : num_pick;
+                           out[i] = deg == 0 ? 0 : num_pick;
                          } else {
-                           out[i] =
-                               end - begin < num_pick ? end - begin : num_pick;
+                           out[i] = deg < num_pick ? deg : num_pick;
                          }
                        });
 
@@ -77,13 +85,13 @@ inline torch::Tensor GetSubIndptr(torch::Tensor indptr, torch::Tensor seeds,
     });
   });
 
-  return sub_indptr;
+  return std::make_tuple(sub_indptr, indices_begin, indices_end);
 }
 
-template <typename T, typename IndexType, int WARP_SIZE = 32>
-__global__ void CSRWiseSampleUniformKernel(T *__restrict__ indptr,
+template <typename T, int WARP_SIZE = 32>
+__global__ void CSRWiseSampleUniformKernel(T *__restrict__ indices_begin,
+                                           T *__restrict__ indices_end,
                                            T *__restrict__ indices,
-                                           IndexType *__restrict__ seeds,
                                            T *__restrict__ sampled_indptr,
                                            T *__restrict__ sampled_indices,
                                            int64_t num_pick, int64_t numel,
@@ -99,9 +107,8 @@ __global__ void CSRWiseSampleUniformKernel(T *__restrict__ indptr,
   curand_init(rand_seed + lane, thread_id, 0, &rng);
 
   for (int i = warp_id; i < numel; i += warp_num) {
-    IndexType seed = seeds[i];
-    T begin = indptr[seed];
-    T end = indptr[seed + 1];
+    T begin = indices_begin[i];
+    T end = indices_end[i];
     T deg = end - begin;
     T *output_ptr = sampled_indices + sampled_indptr[i];
     T *input_ptr = indices + begin;
@@ -138,10 +145,10 @@ __global__ void CSRWiseSampleUniformKernel(T *__restrict__ indptr,
   }
 }
 
-template <typename T, typename IndexType, int WARP_SIZE = 32>
+template <typename T, int WARP_SIZE = 32>
 __global__ void CSRWiseSampleUniformReplaceKernel(
-    T *__restrict__ indptr, T *__restrict__ indices,
-    IndexType *__restrict__ seeds, T *__restrict__ sampled_indptr,
+    T *__restrict__ indices_begin, T *__restrict__ indices_end,
+    T *__restrict__ indices, T *__restrict__ sampled_indptr,
     T *__restrict__ sampled_indices, int64_t num_pick, int64_t numel,
     uint64_t rand_seed) {
   int thread_id = blockIdx.x * blockDim.x + threadIdx.x;
@@ -154,9 +161,8 @@ __global__ void CSRWiseSampleUniformReplaceKernel(
   curand_init(rand_seed + lane, thread_id, 0, &rng);
 
   for (int i = warp_id; i < numel; i += warp_num) {
-    IndexType seed = seeds[i];
-    T begin = indptr[seed];
-    T end = indptr[seed + 1];
+    T begin = indices_begin[i];
+    T end = indices_end[i];
     T deg = end - begin;
 
     if (deg > 0) {
@@ -176,38 +182,45 @@ std::tuple<torch::Tensor, torch::Tensor> CSRWiseSampling(torch::Tensor indptr,
                                                          int64_t num_picks,
                                                          bool replace) {
   int64_t numel = seeds.numel();
-  torch::Tensor sub_indptr = GetSubIndptr(indptr, seeds, num_picks, replace);
+  torch::Tensor sampled_indptr;
+  torch::Tensor indices_begin;
+  torch::Tensor indices_end;
+  std::tie(sampled_indptr, indices_begin, indices_end) =
+      GetSubIndptr(indptr, seeds, num_picks, replace);
   torch::Tensor sampled_indices;
 
   INTEGER_TYPE_SWITCH(indptr.scalar_type(), T, {
-    INTEGER_TYPE_SWITCH(seeds.scalar_type(), IndexType, {
-      thrust::device_ptr<T> item_prefix(
-          static_cast<T *>(sub_indptr.data_ptr<T>()));
-      int nnz = item_prefix[numel];
+    thrust::device_ptr<T> item_prefix(
+        static_cast<T *>(sampled_indptr.data_ptr<T>()));
+    int nnz = item_prefix[numel];
 
-      // allocate sampled_indices
-      sampled_indices =
-          torch::empty(nnz, indices.options().device(torch::kCUDA));
+    // allocate sampled_indices
+    sampled_indices = torch::empty(nnz, indices.options().device(torch::kCUDA));
 
-      // set rand seeds
-      // uint64_t random_seed =
-      //    std::chrono::system_clock::now().time_since_epoch().count();
-      // for debug
-      uint64_t random_seed = 7777;
+    // set rand seeds
+    // uint64_t random_seed =
+    //    std::chrono::system_clock::now().time_since_epoch().count();
+    // for debug
+    uint64_t random_seed = 7777;
 
-      if (replace) {
-        CSRWiseSampleUniformReplaceKernel<<<(numel + 255) / 256, 256>>>(
-            indptr.data_ptr<T>(), indices.data_ptr<T>(),
-            seeds.data_ptr<IndexType>(), sub_indptr.data_ptr<T>(),
-            sampled_indices.data_ptr<T>(), num_picks, numel, random_seed);
-      } else {
-        CSRWiseSampleUniformKernel<<<(numel + 255) / 256, 256>>>(
-            indptr.data_ptr<T>(), indices.data_ptr<T>(),
-            seeds.data_ptr<IndexType>(), sub_indptr.data_ptr<T>(),
-            sampled_indices.data_ptr<T>(), num_picks, numel, random_seed);
-      }
-    });
+    if (replace) {
+      CSRWiseSampleUniformReplaceKernel<<<(numel + 255) / 256, 256>>>(
+          indices_begin.data_ptr<T>(), indices_end.data_ptr<T>(),
+          indices.data_ptr<T>(), sampled_indptr.data_ptr<T>(),
+          sampled_indices.data_ptr<T>(), num_picks, numel, random_seed);
+    } else {
+      CSRWiseSampleUniformKernel<<<(numel + 255) / 256, 256>>>(
+          indices_begin.data_ptr<T>(), indices_end.data_ptr<T>(),
+          indices.data_ptr<T>(), sampled_indptr.data_ptr<T>(),
+          sampled_indices.data_ptr<T>(), num_picks, numel, random_seed);
+    }
   });
 
-  return std::make_tuple(sub_indptr, sampled_indices);
+  return std::make_tuple(sampled_indptr, sampled_indices);
 }
+
+std::tuple<torch::Tensor, torch::Tensor> CSRWiseCacheSampling(
+    torch::Tensor uva_indptr, torch::Tensor uva_indices,
+    torch::Tensor gpu_indptr, torch::Tensor gpu_indices,
+    pycuco::CUCOHashmapWrapper &hashmap, torch::Tensor seeds, int64_t num_picks,
+    bool replace) {}
