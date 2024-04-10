@@ -102,7 +102,58 @@ def test_dgl_sampling():
     print(block)
 
 
+def benchmark():
+    from dgl import create_block
+    from dgl.data import RedditDataset
+
+    dgl_graph = RedditDataset()[0]
+    indptr, indices, _ = dgl_graph.adj_tensors('csc')
+    full_gpu_indptr = indptr.cuda()
+    full_gpu_indices = indices.cuda()
+
+    capi.pin_memory(indptr)
+    capi.pin_memory(indices)
+
+    for size in [10, 100, 1000, 10000, 10_0000]:
+        seeds = torch.randperm(dgl_graph.num_nodes())[:size].cuda()
+        print(seeds.numel())
+
+        for i in range(2):
+
+            with time_recorder("gpu", i != 0):
+                ## wise sampling
+                sub_indptr, sub_indices = capi.csr_sampling(
+                    full_gpu_indptr, full_gpu_indices, seeds, 5, False)
+                ## tensor relabel
+                unique_tensor, (_, relabel_indices) = capi.tensor_relabel(
+                    [seeds, sub_indices])
+                ## create block
+                create_block(
+                    ('csc', (sub_indptr, relabel_indices, torch.Tensor())),
+                    num_src_nodes=unique_tensor.numel(),
+                    num_dst_nodes=seeds.numel(),
+                    device='cuda')
+
+            with time_recorder("uva", i != 0):
+                ## wise sampling
+                sub_indptr, sub_indices = capi.csr_sampling(
+                    indptr, indices, seeds, 5, False)
+                ## tensor relabel
+                unique_tensor, (_, relabel_indices) = capi.tensor_relabel(
+                    [seeds, sub_indices])
+                ## create block
+                create_block(
+                    ('csc', (sub_indptr, relabel_indices, torch.Tensor())),
+                    num_src_nodes=unique_tensor.numel(),
+                    num_dst_nodes=seeds.numel(),
+                    device='cuda')
+
+    capi.unpin_memory(indptr)
+    capi.unpin_memory(indices)
+
+
 if __name__ == "__main__":
-    #test_csr_sampling()
-    #test_tensor_relabel()
+    test_csr_sampling()
+    test_tensor_relabel()
     test_dgl_sampling()
+    benchmark()
