@@ -1,6 +1,9 @@
 cmake_minimum_required(VERSION 3.15.0)
 project(ShmTensor LANGUAGES CUDA CXX)
 
+
+include(cmake/CPM.cmake)
+
 # set flag
 set(CMAKE_CXX_FLAGS "-Wall -Wextra")
 set(CMAKE_CXX_FLAGS_DEBUG "-g")
@@ -38,6 +41,18 @@ message(STATUS "find_pybind11.py output: ${PYBIND_CMAKE_DIR}")
 set(pybind11_DIR ${PYBIND_CMAKE_DIR})
 find_package(pybind11 REQUIRED)
 
+# set cuco
+CPMAddPackage(
+  NAME cuco
+  GITHUB_REPOSITORY NVIDIA/cuCollections
+  GIT_TAG dev
+  OPTIONS
+     "BUILD_TESTS OFF"
+     "BUILD_BENCHMARKS OFF"
+     "BUILD_EXAMPLES OFF"
+)
+
+
 # Define our library target
 file(GLOB ShmTensor_SRC
   src/*.cc
@@ -60,5 +75,6 @@ TARGET_COMPILE_OPTIONS(
 # Enable C++17
 target_compile_features(ShmTensorLib PRIVATE cxx_std_17)
 
-# Link against LibTorch
+# Link against
 target_link_libraries(ShmTensorLib PRIVATE ${ShmTensor_EXTERNAL_LIB})
+target_link_libraries(ShmTensorLib PRIVATE cuco)

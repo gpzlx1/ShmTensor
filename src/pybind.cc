@@ -8,6 +8,9 @@
 #include "utils.h"
 using namespace shm;
 
+#include <vector>
+#include "cuco_hashmap.h"
+
 PYBIND11_MODULE(ShmTensorLib, m) {
   m.def("create_shared_mem", &create_shared_mem, py::arg("name"),
         py::arg("size"), py::arg("pin_memory") = false)
@@ -24,4 +27,10 @@ PYBIND11_MODULE(ShmTensorLib, m) {
       .def("close_mmap_tensor", &close_mmap_tensor, py::arg("size"),
            py::arg("ptr"), py::arg("fd"), py::arg("pin_memory"))
       .def("thrust_scan", &thrust_scan, py::arg("tensor"));
+
+  py::class_<pycuco::CUCOHashmapWrapper>(m, "CUCOStaticHashmap")
+      .def(py::init<torch::Tensor, torch::Tensor, double>())
+      .def("query", &pycuco::CUCOHashmapWrapper::query)
+      .def("capacity", &pycuco::CUCOHashmapWrapper::get_capacity)
+      .def("memory_usage", &pycuco::CUCOHashmapWrapper::get_memory_usage);
 }
