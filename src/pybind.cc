@@ -37,6 +37,14 @@ PYBIND11_MODULE(ShmTensorLib, m) {
            py::arg("gpu_data"), py::arg("indices"), py::arg("hashmap"))
       .def("cache_fetch_with_mask", &CacheTensorFetchWithMask,
            py::arg("uva_data"), py::arg("gpu_data"), py::arg("indices"),
+           py::arg("mask"))
+      .def("uva_set", &UVATensorSet, py::arg("data"), py::arg("indices"),
+           py::arg("update"))
+      .def("cache_set", &CacheTensorSet, py::arg("uva_data"),
+           py::arg("gpu_data"), py::arg("indices"), py::arg("update"),
+           py::arg("hashmap"))
+      .def("cache_set_with_mask", &CacheTensorSetWithMask, py::arg("uva_data"),
+           py::arg("gpu_data"), py::arg("indices"), py::arg("update"),
            py::arg("mask"));
 
   py::class_<pycuco::CUCOHashmapWrapper>(m, "CUCOStaticHashmap")
