@@ -3,6 +3,18 @@
 #include "cuco_hashmap.cuh"
 #include "cuda_runtime.h"
 
+template <typename T, typename IndexType>
+__global__ void OneDimSetKernel(T* __restrict__ data,
+                                IndexType* __restrict__ indices,
+                                T* __restrict__ update_data, int64_t numel) {
+  // thread id
+  int thread_id = blockIdx.x * blockDim.x + threadIdx.x;
+  int threads_num = gridDim.x * blockDim.x;
+  for (int64_t i = thread_id; i < numel; i += threads_num) {
+    data[indices[i]] = update_data[i];
+  }
+}
+
 template <typename T, typename IndexType, int WARP_SIZE = 32>
 __global__ void MultiDimSetKernel(T* __restrict__ data,
                                   IndexType* __restrict__ indices,
@@ -30,7 +42,15 @@ void UVATensorSet(torch::Tensor& uva_data, torch::Tensor& indices,
 
   // checkout one dim or multi dim
   if (uva_data.dim() == 1) {
-    throw std::runtime_error("Not implemented for dim = 1");
+    DATA_TYPE_SWITCH(uva_data.scalar_type(), T, {
+      INTEGER_TYPE_SWITCH(indices.scalar_type(), IndexType, {
+        OneDimSetKernel<T, IndexType><<<(numel + 1024 - 1) / 1024, 1024>>>(
+            uva_data.data_ptr<T>(), indices.data_ptr<IndexType>(),
+            data.data_ptr<T>(), numel);
+      });
+    });
+
+    CUDA_CALL(cudaGetLastError());
 
   } else {
     // compute dim
