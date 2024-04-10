@@ -154,10 +154,10 @@ torch::Tensor CacheTensorFetch(torch::Tensor uva_data, torch::Tensor gpu_data,
   return output;
 }
 
-template <typename T, typename IndexType, int WARP_SIZE = 32>
+template <typename T, typename IndexType, typename MaskType, int WARP_SIZE = 32>
 __global__ void MultiDimCacheFetchWithMaskKernel(
     T* __restrict__ uva_data, T* __restrict__ gpu_data,
-    IndexType* __restrict__ indices, IndexType* __restrict__ mask,
+    IndexType* __restrict__ indices, MaskType* __restrict__ mask,
     T* __restrict__ output, int64_t dim, int64_t numel) {
   int thread_id = blockIdx.x * blockDim.x + threadIdx.x;
   int warp_id = thread_id / WARP_SIZE;
@@ -201,10 +201,12 @@ torch::Tensor CacheTensorFetchWithMask(torch::Tensor uva_data,
 
     DATA_TYPE_SWITCH(uva_data.scalar_type(), T, {
       INTEGER_TYPE_SWITCH(indices.scalar_type(), IndexType, {
-        MultiDimCacheFetchWithMaskKernel<<<(numel + 1024 - 1) / 1024, 1024>>>(
-            uva_data.data_ptr<T>(), gpu_data.data_ptr<T>(),
-            indices.data_ptr<IndexType>(), mask.data_ptr<IndexType>(),
-            output.data_ptr<T>(), dim, numel);
+        INTEGER_TYPE_SWITCH(mask.scalar_type(), MaskType, {
+          MultiDimCacheFetchWithMaskKernel<<<(numel + 1024 - 1) / 1024, 1024>>>(
+              uva_data.data_ptr<T>(), gpu_data.data_ptr<T>(),
+              indices.data_ptr<IndexType>(), mask.data_ptr<MaskType>(),
+              output.data_ptr<T>(), dim, numel);
+        });
       });
     });
 
