@@ -1,7 +1,7 @@
 import torch
 import ShmTensorLib as capi
 import numpy as np
-from disk_tensor import DiskTensor
+from shmtensor import DiskTensor
 
 # save
 npy_data = np.random.randn(100, 100, 100, 100).astype(np.int32)
