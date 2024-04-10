@@ -27,3 +27,9 @@ void UVATensorSet(torch::Tensor& uva_data, torch::Tensor& indices,
 void PinMemory(torch::Tensor& data);
 
 void UnpinMemory(torch::Tensor& data);
+
+std::tuple<torch::Tensor, torch::Tensor> CSRWiseSampling(torch::Tensor indptr,
+                                                         torch::Tensor indices,
+                                                         torch::Tensor seeds,
+                                                         int64_t num_picks,
+                                                         bool replace);
