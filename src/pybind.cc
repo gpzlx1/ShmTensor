@@ -48,7 +48,8 @@ PYBIND11_MODULE(ShmTensorLib, m) {
            py::arg("mask"))
       .def("csr_sampling", &CSRWiseSampling, py::arg("indptr"),
            py::arg("indices"), py::arg("seeds"), py::arg("num_picks"),
-           py::arg("replace"));
+           py::arg("replace"))
+      .def("tensor_relabel", &TensorRelabel, py::arg("tensors"));
 
   py::class_<pycuco::CUCOHashmapWrapper>(m, "CUCOStaticHashmap")
       .def(py::init<torch::Tensor, torch::Tensor, double>())

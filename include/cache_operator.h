@@ -33,3 +33,6 @@ std::tuple<torch::Tensor, torch::Tensor> CSRWiseSampling(torch::Tensor indptr,
                                                          torch::Tensor seeds,
                                                          int64_t num_picks,
                                                          bool replace);
+
+std::tuple<torch::Tensor, std::vector<torch::Tensor>> TensorRelabel(
+    std::vector<torch::Tensor> tensors);

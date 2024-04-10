@@ -30,8 +30,8 @@ def test_csr_sampling():
     replace = True
     sub_indptr, sub_indices = capi.csr_sampling(indptr, indices, seeds,
                                                 num_picks, replace)
-    print(sub_indptr)
-    print(sub_indices)
+    #print(sub_indptr)
+    #print(sub_indices)
     assert torch.equal(
         sub_indptr, torch.tensor([0, 5, 5, 10, 15, 20, 25, 30], device='cuda'))
     assert sub_indices.numel() == 30
@@ -46,8 +46,8 @@ def test_csr_sampling():
     replace = False
     sub_indptr, sub_indices = capi.csr_sampling(indptr, indices, seeds,
                                                 num_picks, replace)
-    print(sub_indptr)
-    print(sub_indices)
+    #print(sub_indptr)
+    #print(sub_indices)
     assert torch.equal(
         sub_indptr, torch.tensor([0, 1, 1, 5, 10, 15, 20, 25], device='cuda'))
     assert sub_indices.numel() == 25
@@ -64,5 +64,45 @@ def test_csr_sampling():
     assert sub_indices[20:25].unique().numel() == 5
 
 
+def test_tensor_relabel():
+    data1 = torch.tensor([2, 0, 4, 1, 4, 0, 4, 1, 6, 4]).cuda()
+    data2 = torch.tensor([3, 8, 5, 10, 10, 6, 11, 11, 9, 14]).cuda()
+    unique_tensor, relabel_tensors = capi.tensor_relabel([data1, data2])
+
+    assert torch.equal(
+        unique_tensor,
+        torch.tensor([2, 0, 4, 1, 6, 3, 8, 5, 10, 11, 9, 14]).cuda())
+    assert torch.equal(relabel_tensors[0],
+                       torch.tensor([0, 1, 2, 3, 2, 1, 2, 3, 4, 2]).cuda())
+    assert torch.equal(relabel_tensors[1],
+                       torch.tensor([5, 6, 7, 8, 8, 4, 9, 9, 10, 11]).cuda())
+
+
+def test_dgl_sampling():
+    from dgl import create_block
+    from dgl.data import RedditDataset
+
+    dgl_graph = RedditDataset()[0]
+    indptr, indices, _ = dgl_graph.adj_tensors('csc')
+
+    # sampling
+    seeds = torch.randperm(dgl_graph.num_nodes())[:1000].cuda()
+    ## wise sampling
+    sub_indptr, sub_indices = capi.csr_sampling(indptr.cuda(), indices.cuda(),
+                                                seeds, 5, False)
+    ## tensor relabel
+    unique_tensor, (_, relabel_indices) = capi.tensor_relabel(
+        [seeds, sub_indices])
+    ## create block
+    block = create_block(
+        ('csc', (sub_indptr, relabel_indices, torch.Tensor())),
+        num_src_nodes=unique_tensor.numel(),
+        num_dst_nodes=seeds.numel(),
+        device='cuda')
+    print(block)
+
+
 if __name__ == "__main__":
-    test_csr_sampling()
+    #test_csr_sampling()
+    #test_tensor_relabel()
+    test_dgl_sampling()
