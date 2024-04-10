@@ -32,7 +32,12 @@ PYBIND11_MODULE(ShmTensorLib, m) {
 
   m.def("pin_memory", &PinMemory, py::arg("data"))
       .def("unpin_memory", &UnpinMemory, py::arg("data"))
-      .def("uva_fetch", &UVATensorFetch, py::arg("data"), py::arg("indices"));
+      .def("uva_fetch", &UVATensorFetch, py::arg("data"), py::arg("indices"))
+      .def("cache_fetch", &CacheTensorFetch, py::arg("uva_data"),
+           py::arg("gpu_data"), py::arg("indices"), py::arg("hashmap"))
+      .def("cache_fetch_with_mask", &CacheTensorFetchWithMask,
+           py::arg("uva_data"), py::arg("gpu_data"), py::arg("indices"),
+           py::arg("mask"));
 
   py::class_<pycuco::CUCOHashmapWrapper>(m, "CUCOStaticHashmap")
       .def(py::init<torch::Tensor, torch::Tensor, double>())
