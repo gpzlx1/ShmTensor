@@ -38,8 +38,7 @@ class GPUSamplingDataloader:
                  replace=False,
                  use_ddp=False,
                  shuffle=True,
-                 drop_last=False,
-                 return_dgl=True):
+                 drop_last=False):
         self.indptr = indptr
         self.indices = indices
         self.seeds = seeds
@@ -49,7 +48,6 @@ class GPUSamplingDataloader:
         self.use_ddp = use_ddp
         self.shuffle = shuffle
         self.drop_last = drop_last
-        self.return_dgl = return_dgl
 
         if self.indptr.device == torch.device('cpu'):
             capi.pin_memory(self.indptr)
@@ -106,22 +104,10 @@ class GPUSamplingDataloader:
                 self.indptr, self.indices, seeds, num_pick, self.replace)
             unique_tensor, (_, relabel_indices) = capi.tensor_relabel(
                 [seeds, sub_indices])
-
-            if self.return_dgl:
-                #block = self.create_block(
-                #    ('csc', (sub_indptr, relabel_indices, torch.Tensor())),
-                #    num_src_nodes=unique_tensor.numel(),
-                #    num_dst_nodes=seeds.numel(),
-                #    device='cuda')
-                block = create_block_from_csc(sub_indptr, relabel_indices,
-                                              torch.Tensor(),
-                                              unique_tensor.numel(),
-                                              seeds.numel())
-                result.insert(0, block)
-            else:
-                result.insert(
-                    0, (unique_tensor, seeds, sub_indptr, relabel_indices))
-
+            block = create_block_from_csc(sub_indptr, relabel_indices,
+                                          torch.Tensor(),
+                                          unique_tensor.numel(), seeds.numel())
+            result.insert(0, block)
             seeds = unique_tensor
 
         intput_nodes = seeds
