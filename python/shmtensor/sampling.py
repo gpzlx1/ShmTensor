@@ -88,6 +88,27 @@ class GPUSamplingDataloader:
         self.curr = 0
         return self
 
+    def update_params(self, **kwargs):
+        for k, v in kwargs.items():
+            setattr(self, k, v)
+
+        if "seeds" in kwargs or "use_ddp" in kwargs:
+            print("Updating seeds")
+            if self.use_ddp:
+                world_size = dist.get_world_size()
+                rank = dist.get_rank()
+                numel = self.seeds.numel()
+                partition_size = (numel + world_size - 1) // world_size
+                self.seeds = self.seeds[rank * partition_size:(rank + 1) *
+                                        partition_size]
+            self.seeds = self.seeds.cuda()
+
+            if self.drop_last:
+                self.len = self.seeds.numel() // self.batchsize
+            else:
+                self.len = (self.seeds.numel() + self.batchsize -
+                            1) // self.batchsize
+
     def __next__(self):
         if self.curr >= self.len:
             raise StopIteration
