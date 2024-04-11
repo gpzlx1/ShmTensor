@@ -3,6 +3,7 @@ from dgl.data import RedditDataset
 import torch
 import dgl
 import time
+from ogb.nodeproppred import DglNodePropPredDataset
 
 
 class time_recorder:
@@ -21,9 +22,16 @@ class time_recorder:
             print("{}\t\t\t{:.2f}".format(self.message, self.time * 1000))
 
 
-dgl_graph = RedditDataset()[0]
+# dgl_graph = RedditDataset()[0]
+#indptr, indices, _ = dgl_graph.adj_tensors('csc')
+#train_nids = torch.nonzero(dgl_graph.ndata['train_mask']).squeeze(1)
+
+dataset = DglNodePropPredDataset(name='ogbn-products', root='/data')
+split_idx = dataset.get_idx_split()
+train_nids, valid_idx, test_idx = split_idx["train"], split_idx[
+    "valid"], split_idx["test"]
+dgl_graph, label = dataset[0]
 indptr, indices, _ = dgl_graph.adj_tensors('csc')
-train_nids = torch.nonzero(dgl_graph.ndata['train_mask']).squeeze(1)
 
 dataloader = GPUSamplingDataloader(indptr.clone(),
                                    indices.clone(),
@@ -37,12 +45,8 @@ for _ in range(2):
         for step, i in enumerate(dataloader):
             pass
 
-dataloader = GPUSamplingDataloader(indptr.clone().cuda(),
-                                   indices.clone().cuda(),
-                                   train_nids.clone().cuda(),
-                                   batchsize=1000,
-                                   num_picks=[10, 25],
-                                   shuffle=True)
+sampling_hotness, feature_hotness = dataloader.presampling()
+dataloader.create_cache(0.5 * 1024 * 1024 * 1024, sampling_hotness)
 
 for _ in range(2):
     with time_recorder("ours_gpu", _ != 0):

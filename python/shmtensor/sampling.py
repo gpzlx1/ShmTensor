@@ -100,8 +100,14 @@ class GPUSamplingDataloader:
         output_nodes = seeds
         result = []
         for num_pick in reversed(self.num_picks):
-            sub_indptr, sub_indices = capi.csr_sampling(
-                self.indptr, self.indices, seeds, num_pick, self.replace)
+            if getattr(self, 'has_cache', None):
+                sub_indptr, sub_indices = capi.csr_cache_sampling(
+                    self.indptr, self.indices, self.gpu_indptr,
+                    self.gpu_indices, self.hashmap, seeds, num_pick,
+                    self.replace)
+            else:
+                sub_indptr, sub_indices = capi.csr_sampling(
+                    self.indptr, self.indices, seeds, num_pick, self.replace)
             unique_tensor, (_, relabel_indices) = capi.tensor_relabel(
                 [seeds, sub_indices])
             block = create_block_from_csc(sub_indptr, relabel_indices,
@@ -113,3 +119,64 @@ class GPUSamplingDataloader:
         intput_nodes = seeds
 
         return intput_nodes, output_nodes, result
+
+    def create_cache(self, cache_capacity, hotness):
+        if cache_capacity <= 0:
+            return
+
+        # test wheather full cache
+        full_size = self.indptr.nbytes + self.indices.nbytes
+
+        if full_size <= cache_capacity:
+            self.indices = self.indices.cuda()
+            self.indptr = self.indptr.cuda()
+            print("Cache Ratio for GPU sampling: {:.2f}".format(
+                cache_capacity / full_size))
+            return
+
+        degress = self.indptr[1:] - self.indptr[:-1]
+        _, cache_candidates = torch.sort(hotness, descending=True)
+
+        # compute size
+        size = degress[cache_candidates] * self.indices.element_size(
+        ) + self.indptr.element_size()
+        prefix_sum_size = torch.cumsum(size, dim=0)
+        cache_size = torch.searchsorted(prefix_sum_size, cache_capacity).item()
+        cache_candidates = cache_candidates[:cache_size].cuda()
+
+        # binary search
+        if cache_candidates.numel() > 0:
+            self.gpu_indptr, self.gpu_indices = capi.create_subcsr(
+                self.indptr, self.indices, cache_candidates)
+            self.hashmap = capi.CUCOStaticHashmap(
+                cache_candidates,
+                torch.arange(cache_candidates.numel(),
+                             device='cuda',
+                             dtype=cache_candidates.dtype), 0.8)
+            self.has_cache = True
+            print("Cache Ratio for GPU sampling: {:.2f}".format(
+                prefix_sum_size[cache_size].item() / full_size))
+            print("create cache success")
+
+    def presampling(self):
+        sampling_hotness = torch.zeros(self.indptr.numel() - 1, device='cpu')
+        feature_hotness = torch.zeros(self.indptr.numel() - 1, device='cpu')
+
+        for i in range(self.len):
+            seeds = self.seeds[i * self.batchsize:(i + 1) * self.batchsize]
+
+            for num_pick in reversed(self.num_picks):
+                sampling_hotness[seeds.cpu()] += 1
+
+                sub_indptr, sub_indices = capi.csr_sampling(
+                    self.indptr, self.indices, seeds, num_pick, self.replace)
+                unique_tensor, (_, relabel_indices) = capi.tensor_relabel(
+                    [seeds, sub_indices])
+                seeds = unique_tensor
+
+                feature_hotness[unique_tensor.cpu()] += 1
+
+        print(sampling_hotness)
+        print(feature_hotness)
+
+        return sampling_hotness, feature_hotness
