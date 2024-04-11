@@ -7,7 +7,7 @@
 
 namespace pycuco {
 
-int64_t temp_size = 0;
+extern int64_t temp_size;
 
 template <typename T>
 class torch_allocator {
@@ -51,7 +51,7 @@ class CUCOHashmap : public Hashmap {
  public:
   using map_type = cuco::static_map<
       Key, Value, std::size_t, cuda::thread_scope_device, thrust::equal_to<Key>,
-      cuco::linear_probing<4, cuco::default_hash_function<Key>>,
+      cuco::linear_probing<1, cuco::default_hash_function<Key>>,
       torch_allocator<cuco::pair<Key, Value>>, cuco::storage<1>>;
 
   CUCOHashmap(torch::Tensor keys, torch::Tensor values, double load_factor) {
@@ -86,7 +86,7 @@ class CUCOHashmap : public Hashmap {
     return result;
   };
 
- private:
+  // private:
   torch::TensorOptions key_options_;
   torch::TensorOptions value_options_;
   map_type* map_;

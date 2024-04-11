@@ -19,7 +19,6 @@ class CUCOHashmapWrapper {
   int64_t get_capacity() { return map_->capacity_; }
   int64_t get_memory_usage() { return map_->memory_usage_; }
 
- private:
   Hashmap* map_;
   caffe2::TypeMeta key_type_;
   caffe2::TypeMeta value_type_;

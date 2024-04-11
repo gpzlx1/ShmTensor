@@ -5,6 +5,8 @@
 
 namespace pycuco {
 
+int64_t temp_size = 0;
+
 CUCOHashmapWrapper::CUCOHashmapWrapper(torch::Tensor keys, torch::Tensor values,
                                        double load_factor) {
   CHECK_CUDA(keys);

@@ -38,3 +38,22 @@
       LOG(FATAL) << "ID can only be int32 or int64"; \
     }                                                \
   } while (0);
+
+#define DATA_TYPE_SWITCH(val, IdType, ...)               \
+  do {                                                   \
+    if ((val) == torch::kFloat32) {                      \
+      typedef float IdType;                              \
+      { __VA_ARGS__ }                                    \
+    } else if ((val) == torch::kFloat64) {               \
+      typedef double IdType;                             \
+      { __VA_ARGS__ }                                    \
+    } else if ((val) == torch::kInt32) {                 \
+      typedef int32_t IdType;                            \
+      { __VA_ARGS__ }                                    \
+    } else if ((val) == torch::kInt64) {                 \
+      typedef int64_t IdType;                            \
+      { __VA_ARGS__ }                                    \
+    } else {                                             \
+      LOG(FATAL) << "ID can only be float32 or float64"; \
+    }                                                    \
+  } while (0);
