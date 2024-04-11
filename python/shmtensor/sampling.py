@@ -176,7 +176,14 @@ class GPUSamplingDataloader:
 
                 feature_hotness[unique_tensor.cpu()] += 1
 
-        print(sampling_hotness)
-        print(feature_hotness)
+        if self.use_ddp:
+            sampling_hotness = sampling_hotness.cuda()
+            feature_hotness = feature_hotness.cuda()
+
+            torch.distributed.all_reduce(sampling_hotness)
+            torch.distributed.all_reduce(feature_hotness)
+
+            sampling_hotness = sampling_hotness.cpu()
+            feature_hotness = feature_hotness.cpu()
 
         return sampling_hotness, feature_hotness
