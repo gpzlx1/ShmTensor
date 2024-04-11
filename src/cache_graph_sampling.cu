@@ -433,10 +433,10 @@ std::tuple<torch::Tensor, torch::Tensor> CreateCacheCSR(
 template <typename T, typename MaskType, int WARP_SIZE = 32>
 __global__ void CSRWiseMaskSampleUniformKernel(
     T *__restrict__ indices_begin, T *__restrict__ indices_end,
-    T *__restrict__ indices, T *__restrict__ gpu_indptr,
-    T *__restrict__ gpu_indices, MaskType *__restrict__ mask,
-    T *__restrict__ sampled_indptr, T *__restrict__ sampled_indices,
-    int64_t num_pick, int64_t numel, uint64_t rand_seed) {
+    T *__restrict__ indices, T *__restrict__ gpu_indices,
+    MaskType *__restrict__ mask, T *__restrict__ sampled_indptr,
+    T *__restrict__ sampled_indices, int64_t num_pick, int64_t numel,
+    uint64_t rand_seed) {
   int thread_id = blockIdx.x * blockDim.x + threadIdx.x;
   int warp_num = gridDim.x * blockDim.x / WARP_SIZE;
   int warp_id = thread_id / WARP_SIZE;
@@ -449,11 +449,11 @@ __global__ void CSRWiseMaskSampleUniformKernel(
     auto value = mask[i];
     bool in_gpu = value >= 0;
 
-    T begin = in_gpu ? gpu_indptr[value] : indices_begin[i];
-    T end = in_gpu ? gpu_indptr[value + 1] : indices_end[i];
+    T begin = indices_begin[i];
+    T end = indices_end[i];
     T deg = end - begin;
     T *output_ptr = sampled_indices + sampled_indptr[i];
-    T *input_ptr = in_gpu ? gpu_indices + begin : indices + begin;
+    T *input_ptr = (in_gpu ? gpu_indices : indices) + begin;
 
     if (deg <= num_pick) {
       // just copy
@@ -490,10 +490,10 @@ __global__ void CSRWiseMaskSampleUniformKernel(
 template <typename T, typename MaskType, int WARP_SIZE = 32>
 __global__ void CSRWiseMaskSampleUniformReplaceKernel(
     T *__restrict__ indices_begin, T *__restrict__ indices_end,
-    T *__restrict__ indices, T *__restrict__ gpu_indptr,
-    T *__restrict__ gpu_indices, MaskType *__restrict__ mask,
-    T *__restrict__ sampled_indptr, T *__restrict__ sampled_indices,
-    int64_t num_pick, int64_t numel, uint64_t rand_seed) {
+    T *__restrict__ indices, T *__restrict__ gpu_indices,
+    MaskType *__restrict__ mask, T *__restrict__ sampled_indptr,
+    T *__restrict__ sampled_indices, int64_t num_pick, int64_t numel,
+    uint64_t rand_seed) {
   int thread_id = blockIdx.x * blockDim.x + threadIdx.x;
   int warp_num = gridDim.x * blockDim.x / WARP_SIZE;
   int warp_id = thread_id / WARP_SIZE;
@@ -505,13 +505,13 @@ __global__ void CSRWiseMaskSampleUniformReplaceKernel(
   for (int i = warp_id; i < numel; i += warp_num) {
     auto value = mask[i];
     bool in_gpu = value >= 0;
-    T begin = in_gpu ? gpu_indptr[value] : indices_begin[i];
-    T end = in_gpu ? gpu_indptr[value + 1] : indices_end[i];
+    T begin = indices_begin[i];
+    T end = indices_end[i];
     T deg = end - begin;
 
     if (deg > 0) {
       T *output_ptr = sampled_indices + sampled_indptr[i];
-      T *input_ptr = in_gpu ? gpu_indices + begin : indices + begin;
+      T *input_ptr = (in_gpu ? gpu_indices : indices) + begin;
 
       for (int i = lane; i < num_pick; i += WARP_SIZE) {
         int select = curand(&rng) % deg;
@@ -519,6 +519,68 @@ __global__ void CSRWiseMaskSampleUniformReplaceKernel(
       }
     }
   }
+}
+
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> GetSubIndptrWithMash(
+    torch::Tensor indptr, torch::Tensor gpu_indptr, torch::Tensor seeds,
+    torch::Tensor mask, int64_t num_pick, bool replace) {
+  int64_t numel = seeds.numel();
+  torch::Tensor sub_indptr =
+      torch::empty((numel + 1), indptr.options().device(torch::kCUDA));
+  torch::Tensor indices_begin =
+      torch::empty(numel, indptr.options().device(torch::kCUDA));
+  torch::Tensor indices_end =
+      torch::empty(numel, indptr.options().device(torch::kCUDA));
+
+  INTEGER_TYPE_SWITCH(indptr.scalar_type(), IdType, {
+    INTEGER_TYPE_SWITCH(seeds.scalar_type(), IndexType, {
+      INTEGER_TYPE_SWITCH(mask.scalar_type(), MaskType, {
+        thrust::device_ptr<IdType> item_prefix(
+            static_cast<IdType *>(sub_indptr.data_ptr<IdType>()));
+
+        using it = thrust::counting_iterator<IdType>;
+        thrust::for_each(thrust::device, it(0), it(numel),
+                         [in_indptr = indptr.data_ptr<IdType>(),
+                          in_gpu_indptr = gpu_indptr.data_ptr<IdType>(),
+                          seeds_ptr = seeds.data_ptr<IndexType>(),
+                          out = thrust::raw_pointer_cast(item_prefix),
+                          begin_ptr = indices_begin.data_ptr<IdType>(),
+                          end_ptr = indices_end.data_ptr<IdType>(),
+                          mask_ptr = mask.data_ptr<MaskType>(), replace,
+                          num_pick] __device__(int i) mutable {
+                           MaskType value = mask_ptr[i];
+                           bool in_gpu = value >= 0;
+
+                           IdType begin;
+                           IdType end;
+
+                           if (in_gpu) {
+                             begin = in_gpu_indptr[value];
+                             end = in_gpu_indptr[value + 1];
+                           } else {
+                             IdType row = seeds_ptr[i];
+                             begin = in_indptr[row];
+                             end = in_indptr[row + 1];
+                           }
+
+                           IdType deg = end - begin;
+                           begin_ptr[i] = begin;
+                           end_ptr[i] = end;
+
+                           if (replace) {
+                             out[i] = deg == 0 ? 0 : num_pick;
+                           } else {
+                             out[i] = deg < num_pick ? deg : num_pick;
+                           }
+                         });
+
+        cub_exclusiveSum<IdType>(thrust::raw_pointer_cast(item_prefix),
+                                 numel + 1);
+      });
+    });
+  });
+
+  return std::make_tuple(sub_indptr, indices_begin, indices_end);
 }
 
 std::tuple<torch::Tensor, torch::Tensor> CSRWiseMaskSampling(
@@ -531,8 +593,8 @@ std::tuple<torch::Tensor, torch::Tensor> CSRWiseMaskSampling(
   torch::Tensor indices_end;
   torch::Tensor sampled_indices;
 
-  std::tie(sampled_indptr, indices_begin, indices_end) =
-      GetSubIndptr(uva_indptr, seeds, num_picks, replace);
+  std::tie(sampled_indptr, indices_begin, indices_end) = GetSubIndptrWithMash(
+      uva_indptr, gpu_indptr, seeds, mask, num_picks, replace);
 
   INTEGER_TYPE_SWITCH(uva_indptr.scalar_type(), T, {
     INTEGER_TYPE_SWITCH(mask.scalar_type(), MaskType, {
@@ -548,17 +610,15 @@ std::tuple<torch::Tensor, torch::Tensor> CSRWiseMaskSampling(
       if (replace) {
         CSRWiseMaskSampleUniformReplaceKernel<<<(numel + 255) / 256, 256>>>(
             indices_begin.data_ptr<T>(), indices_end.data_ptr<T>(),
-            uva_indices.data_ptr<T>(), gpu_indptr.data_ptr<T>(),
-            gpu_indices.data_ptr<T>(), mask.data_ptr<MaskType>(),
-            sampled_indptr.data_ptr<T>(), sampled_indices.data_ptr<T>(),
-            num_picks, numel, random_seed);
+            uva_indices.data_ptr<T>(), gpu_indices.data_ptr<T>(),
+            mask.data_ptr<MaskType>(), sampled_indptr.data_ptr<T>(),
+            sampled_indices.data_ptr<T>(), num_picks, numel, random_seed);
       } else {
         CSRWiseMaskSampleUniformKernel<<<(numel + 255) / 256, 256>>>(
             indices_begin.data_ptr<T>(), indices_end.data_ptr<T>(),
-            uva_indices.data_ptr<T>(), gpu_indptr.data_ptr<T>(),
-            gpu_indices.data_ptr<T>(), mask.data_ptr<MaskType>(),
-            sampled_indptr.data_ptr<T>(), sampled_indices.data_ptr<T>(),
-            num_picks, numel, random_seed);
+            uva_indices.data_ptr<T>(), gpu_indices.data_ptr<T>(),
+            mask.data_ptr<MaskType>(), sampled_indptr.data_ptr<T>(),
+            sampled_indices.data_ptr<T>(), num_picks, numel, random_seed);
       }
     });
   });
