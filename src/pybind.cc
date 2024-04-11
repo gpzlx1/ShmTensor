@@ -49,6 +49,12 @@ PYBIND11_MODULE(ShmTensorLib, m) {
       .def("csr_sampling", &CSRWiseSampling, py::arg("indptr"),
            py::arg("indices"), py::arg("seeds"), py::arg("num_picks"),
            py::arg("replace"))
+      .def("csr_cache_sampling", &CSRWiseCacheSampling, py::arg("uva_indptr"),
+           py::arg("uva_indices"), py::arg("gpu_indptr"),
+           py::arg("gpu_indices"), py::arg("hashmap"), py::arg("seeds"),
+           py::arg("num_picks"), py::arg("replace"))
+      .def("create_subcsr", &CreateCacheCSR, py::arg("uva_indptr"),
+           py::arg("uva_indices"), py::arg("seeds"))
       .def("tensor_relabel", &TensorRelabel, py::arg("tensors"));
 
   py::class_<pycuco::CUCOHashmapWrapper>(m, "CUCOStaticHashmap")

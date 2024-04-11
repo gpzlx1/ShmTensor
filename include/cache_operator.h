@@ -34,5 +34,14 @@ std::tuple<torch::Tensor, torch::Tensor> CSRWiseSampling(torch::Tensor indptr,
                                                          int64_t num_picks,
                                                          bool replace);
 
+std::tuple<torch::Tensor, torch::Tensor> CSRWiseCacheSampling(
+    torch::Tensor uva_indptr, torch::Tensor uva_indices,
+    torch::Tensor gpu_indptr, torch::Tensor gpu_indices,
+    pycuco::CUCOHashmapWrapper& hashmap, torch::Tensor seeds, int64_t num_picks,
+    bool replace);
+
+std::tuple<torch::Tensor, torch::Tensor> CreateCacheCSR(
+    torch::Tensor uva_indptr, torch::Tensor uva_indices, torch::Tensor seeds);
+
 std::tuple<torch::Tensor, std::vector<torch::Tensor>> TensorRelabel(
     std::vector<torch::Tensor> tensors);
