@@ -88,9 +88,9 @@ torch::Tensor UVATensorFetch(torch::Tensor& uva_data, torch::Tensor& indices) {
 
 template <typename Map, typename T, typename IndexType>
 __global__ void OneDimCacheFetchKernel(Map map_ref, T* __restrict__ uva_data,
-                                         T* __restrict__ gpu_data,
-                                         IndexType* __restrict__ indices,
-                                         T* __restrict__ output, int64_t numel) {
+                                       T* __restrict__ gpu_data,
+                                       IndexType* __restrict__ indices,
+                                       T* __restrict__ output, int64_t numel) {
   int thread_id = blockIdx.x * blockDim.x + threadIdx.x;
   int threads_num = gridDim.x * blockDim.x;
   for (int64_t i = thread_id; i < numel; i += threads_num) {
@@ -184,6 +184,22 @@ torch::Tensor CacheTensorFetch(torch::Tensor uva_data, torch::Tensor gpu_data,
   return output;
 }
 
+
+template <typename T, typename IndexType, typename MaskType>
+__global__ void OneDimCacheFetchWithMaskKernel(
+    T* __restrict__ uva_data, T* __restrict__ gpu_data,
+    IndexType* __restrict__ indices, MaskType* __restrict__ mask,
+    T* __restrict__ output, int64_t numel) {
+  int thread_id = blockIdx.x * blockDim.x + threadIdx.x;
+  int threads_num = gridDim.x * blockDim.x;
+  for (int64_t i = thread_id; i < numel; i += threads_num) {
+    bool found = mask[i] >= 0;
+    T* input_ptr =
+        found ? gpu_data + mask[i]: uva_data + indices[i];
+    output[i] = *input_ptr;
+  }
+}
+
 template <typename T, typename IndexType, typename MaskType, int WARP_SIZE = 32>
 __global__ void MultiDimCacheFetchWithMaskKernel(
     T* __restrict__ uva_data, T* __restrict__ gpu_data,
@@ -215,8 +231,17 @@ torch::Tensor CacheTensorFetchWithMask(torch::Tensor uva_data,
   torch::Tensor output;
 
   if (gpu_data.dim() == 1) {
-    throw std::runtime_error("Not implemented for dim = 1");
-
+    output = torch::empty(numel, gpu_data.options().device(torch::kCUDA));
+    DATA_TYPE_SWITCH(uva_data.scalar_type(), T, {
+      INTEGER_TYPE_SWITCH(indices.scalar_type(), IndexType, {
+        INTEGER_TYPE_SWITCH(mask.scalar_type(), MaskType, {
+          OneDimCacheFetchWithMaskKernel<<<(numel + 1024 - 1) / 1024, 1024>>>(
+              uva_data.data_ptr<T>(), gpu_data.data_ptr<T>(),
+              indices.data_ptr<IndexType>(), mask.data_ptr<MaskType>(),
+              output.data_ptr<T>(), numel);
+        });
+      });
+    });
   } else {
     // compute dim and output tensor size
     int64_t dim = 1;

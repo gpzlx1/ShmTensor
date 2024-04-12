@@ -71,6 +71,40 @@ def test_cache_multi_dim():
     capi.unpin_memory(data)
 
 
+def test_cache_mask_one_dim():
+    data = torch.arange(100).float()
+    capi.pin_memory(data)
+
+    indices = torch.randint(0, 100, (50, )).long().unique().cuda()
+    values = torch.arange(indices.numel()).long().cuda()
+    gpu_data = data[indices.cpu()].cuda()
+    hashmap = capi.CUCOStaticHashmap(indices, values, 0.8)
+
+    query = torch.randint(0, 100, (20, )).long().cuda()
+    mask = hashmap.query(query)
+    output = capi.cache_fetch_with_mask(data, gpu_data, query, mask)
+
+    assert torch.equal(output, data[query.cpu()].cuda())
+    capi.unpin_memory(data)
+
+
+def test_cache_mask_multi_dim():
+    data = torch.randn(100, 100, 100)
+    capi.pin_memory(data)
+
+    indices = torch.randint(0, 100, (50, )).long().unique().cuda()
+    values = torch.arange(indices.numel()).long().cuda()
+    gpu_data = data[indices.cpu()].cuda()
+    hashmap = capi.CUCOStaticHashmap(indices, values, 0.8)
+
+    query = torch.randint(0, 100, (20, )).long().cuda()
+    mask = hashmap.query(query)
+    output = capi.cache_fetch_with_mask(data, gpu_data, query, mask)
+
+    assert torch.equal(output, data[query.cpu()].cuda())
+    capi.unpin_memory(data)
+
+
 def benchmark():
     data = torch.randn(100_0000, 128).float()
     capi.pin_memory(data)
@@ -125,4 +159,6 @@ if __name__ == "__main__":
     test_uva_multi_dim()
     test_cache_one_dim()
     test_cache_multi_dim()
+    test_cache_mask_one_dim()
+    test_cache_mask_multi_dim()
     benchmark()

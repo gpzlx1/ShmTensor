@@ -92,6 +92,34 @@ def test_cache_set():
 
 
 def test_mask_set():
+    # one dimension
+    data = torch.randn(100_0000).float()
+    capi.pin_memory(data)
+
+    cache_ratio = 0.7
+    indices = torch.randperm(100_0000).long().cuda()
+    indices = indices[:int(100_0000 * cache_ratio)]
+    values = torch.arange(indices.numel()).long().cuda()
+    gpu_data = data[indices.cpu()].cuda()
+    hashmap = capi.CUCOStaticHashmap(indices, values, 0.8)
+
+    for size in [10, 100, 1000, 10000, 100000, 30_0000, 100_0000]:
+        update_index = torch.randint(0, 100_0000,
+                                     (size, )).long().cuda().unique()
+        update_data = torch.randn(update_index.numel()).float().cuda()
+
+        update_mask = hashmap.query(update_index)
+        capi.cache_set_with_mask(data, gpu_data, update_index, update_data,
+                                 update_mask)
+
+        query_mask = hashmap.query(update_index)
+        fetch = capi.cache_fetch_with_mask(data, gpu_data, update_index,
+                                           query_mask)
+
+        assert torch.equal(update_data, fetch)
+    capi.unpin_memory(data)
+
+    # multidimension
     data = torch.randn(100_0000, 128).float()
     capi.pin_memory(data)
 
@@ -111,9 +139,9 @@ def test_mask_set():
         capi.cache_set_with_mask(data, gpu_data, update_index, update_data,
                                  update_mask)
 
-        qurey_mask = hashmap.query(update_index)
+        query_mask = hashmap.query(update_index)
         fetch = capi.cache_fetch_with_mask(data, gpu_data, update_index,
-                                           qurey_mask)
+                                           query_mask)
 
         assert torch.equal(update_data, fetch)
     capi.unpin_memory(data)

@@ -76,9 +76,9 @@ void UVATensorSet(torch::Tensor& uva_data, torch::Tensor& indices,
 
 template <typename Map, typename T, typename IndexType>
 __global__ void OneDimCacheSetKernel(Map map_ref, T* __restrict__ uva_data,
-                                       T* __restrict__ gpu_data,
-                                       IndexType* __restrict__ indices,
-                                       T* __restrict__ update_data, int64_t numel) {
+                                     T* __restrict__ gpu_data,
+                                     IndexType* __restrict__ indices,
+                                     T* __restrict__ update_data, int64_t numel) {
   int thread_id = blockIdx.x * blockDim.x + threadIdx.x;
   int threads_num = gridDim.x * blockDim.x;
   for (int64_t i = thread_id; i < numel; i += threads_num) {
@@ -164,6 +164,23 @@ void CacheTensorSet(torch::Tensor uva_data, torch::Tensor gpu_data,
   }
 }
 
+template <typename T, typename IndexType, typename MaskType>
+__global__ void OneDimCacheSetWithMaskKernel(T* __restrict__ uva_data,
+                                             T* __restrict__ gpu_data,
+                                             IndexType* __restrict__ indices,
+                                             MaskType* __restrict__ mask,
+                                             T* __restrict__ update_data,
+                                             int64_t numel) {
+  int thread_id = blockIdx.x * blockDim.x + threadIdx.x;
+  int threads_num = gridDim.x * blockDim.x;
+  for (int64_t i = thread_id; i < numel; i += threads_num) {
+    bool found = mask[i] >= 0;
+    T* data_ptr =
+        found ? gpu_data + mask[i] : uva_data + indices[i];
+    *data_ptr = update_data[i];
+  }
+}
+
 template <typename T, typename IndexType, typename MaskType, int WARP_SIZE = 32>
 __global__ void MultiDimCacheSetWithMaskKernel(T* __restrict__ uva_data,
                                                T* __restrict__ gpu_data,
@@ -195,8 +212,16 @@ void CacheTensorSetWithMask(torch::Tensor uva_data, torch::Tensor gpu_data,
   int64_t numel = indices.numel();
 
   if (gpu_data.dim() == 1) {
-    throw std::runtime_error("Not implemented for dim = 1");
-
+    DATA_TYPE_SWITCH(uva_data.scalar_type(), T, {
+      INTEGER_TYPE_SWITCH(indices.scalar_type(), IndexType, {
+        INTEGER_TYPE_SWITCH(mask.scalar_type(), MaskType, {
+          OneDimCacheSetWithMaskKernel<<<(numel + 1024 - 1) / 1024, 1024>>>(
+              uva_data.data_ptr<T>(), gpu_data.data_ptr<T>(),
+              indices.data_ptr<IndexType>(), mask.data_ptr<MaskType>(),
+              data.data_ptr<T>(), numel);
+        });
+      });
+    });
   } else {
     // compute dim
     int64_t dim = 1;
