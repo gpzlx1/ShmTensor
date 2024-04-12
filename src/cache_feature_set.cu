@@ -74,6 +74,22 @@ void UVATensorSet(torch::Tensor& uva_data, torch::Tensor& indices,
   }
 }
 
+template <typename Map, typename T, typename IndexType>
+__global__ void OneDimCacheSetKernel(Map map_ref, T* __restrict__ uva_data,
+                                       T* __restrict__ gpu_data,
+                                       IndexType* __restrict__ indices,
+                                       T* __restrict__ update_data, int64_t numel) {
+  int thread_id = blockIdx.x * blockDim.x + threadIdx.x;
+  int threads_num = gridDim.x * blockDim.x;
+  for (int64_t i = thread_id; i < numel; i += threads_num) {
+    int64_t index = indices[i];
+    auto found = map_ref.find(index);
+    T* output_ptr = found != map_ref.end() ? gpu_data + found->second
+                                           : uva_data + index;
+    *output_ptr = update_data[i];
+  }
+}
+
 template <typename Map, typename T, typename IndexType, int WARP_SIZE = 32>
 __global__ void MultiDimCacheSetKernel(Map map_ref, T* __restrict__ uva_data,
                                        T* __restrict__ gpu_data,
@@ -105,8 +121,20 @@ void CacheTensorSet(torch::Tensor uva_data, torch::Tensor gpu_data,
   int64_t numel = indices.numel();
 
   if (gpu_data.dim() == 1) {
-    throw std::runtime_error("Not implemented for dim = 1");
+    INTEGER_TYPE_SWITCH(hashmap.key_type_, Key, {
+      INTEGER_TYPE_SWITCH(hashmap.value_type_, Value, {
+        auto map = (pycuco::CUCOHashmap<Key, Value>*)hashmap.map_;
+        auto map_ref = map->map_->ref(cuco::find);
 
+        DATA_TYPE_SWITCH(uva_data.scalar_type(), T, {
+          INTEGER_TYPE_SWITCH(indices.scalar_type(), IndexType, {
+            OneDimCacheSetKernel<<<(numel + 1024 - 1) / 1024, 1024>>>(
+                map_ref, uva_data.data_ptr<T>(), gpu_data.data_ptr<T>(),
+                indices.data_ptr<IndexType>(), data.data_ptr<T>(), numel);
+          });
+        });
+      });
+    });
   } else {
     // compute dim
     int64_t dim = 1;
