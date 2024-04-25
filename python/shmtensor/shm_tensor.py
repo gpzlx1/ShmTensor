@@ -6,6 +6,7 @@ import weakref
 itemsize = {
     torch.float32: 4,
     torch.float64: 8,
+    torch.int16: 2,
     torch.int32: 4,
     torch.int64: 8,
     torch.uint8: 1,
