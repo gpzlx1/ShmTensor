@@ -3,6 +3,16 @@ import torch.distributed as dist
 import ShmTensorLib as capi
 import weakref
 
+itemsize = {
+    torch.float32: 4,
+    torch.float64: 8,
+    torch.int32: 4,
+    torch.int64: 8,
+    torch.uint8: 1,
+    torch.int8: 1,
+    torch.bool: 1,
+}
+
 
 class ShmTensor:
 
@@ -22,7 +32,7 @@ class ShmTensor:
         self.cur_world_size = local_world_size
         self.cur_group = local_group
 
-        self.size_ = self.dtype_.itemsize
+        self.size_ = itemsize[self.dtype_]
         for i in shape:
             self.size_ *= i
         if self.size_ <= 0:
