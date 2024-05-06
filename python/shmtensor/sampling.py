@@ -48,7 +48,11 @@ class GPUSamplingDataloader:
         self.use_ddp = use_ddp
         self.shuffle = shuffle
         self.drop_last = drop_last
+
         self.has_cache = False
+        self.gpu_indptr = None
+        self.gpu_indices = None
+        self.hashmap = None
 
         if self.indptr.device == torch.device('cpu'):
             capi.pin_memory(self.indptr)
@@ -186,6 +190,9 @@ class GPUSamplingDataloader:
         del self.gpu_indptr
         del self.gpu_indices
         del self.hashmap
+        self.gpu_indptr = None
+        self.gpu_indices = None
+        self.hashmap = None
 
     def presampling(self):
         sampling_hotness = torch.zeros(self.indptr.numel() - 1, device='cpu')
