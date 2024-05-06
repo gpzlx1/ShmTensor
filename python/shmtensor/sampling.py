@@ -48,6 +48,7 @@ class GPUSamplingDataloader:
         self.use_ddp = use_ddp
         self.shuffle = shuffle
         self.drop_last = drop_last
+        self.has_cache = False
 
         if self.indptr.device == torch.device('cpu'):
             capi.pin_memory(self.indptr)
@@ -121,7 +122,7 @@ class GPUSamplingDataloader:
         output_nodes = seeds
         result = []
         for num_pick in reversed(self.num_picks):
-            if getattr(self, 'has_cache', None):
+            if self.has_cache:
                 sub_indptr, sub_indices = capi.csr_cache_sampling(
                     self.indptr, self.indices, self.gpu_indptr,
                     self.gpu_indices, self.hashmap, seeds, num_pick,
@@ -149,6 +150,7 @@ class GPUSamplingDataloader:
         full_size = self.indptr.nbytes + self.indices.nbytes
 
         if full_size <= cache_capacity:
+            self.has_cache = False
             self.indices = self.indices.cuda()
             self.indptr = self.indptr.cuda()
             print("Cache Ratio for GPU sampling: {:.2f}".format(
@@ -178,6 +180,12 @@ class GPUSamplingDataloader:
             print("Cache Ratio for GPU sampling: {:.2f}".format(
                 prefix_sum_size[cache_size].item() / full_size))
             print("create cache success")
+
+    def clear_cache(self):
+        self.has_cache = False
+        del self.gpu_indptr
+        del self.gpu_indices
+        del self.hashmap
 
     def presampling(self):
         sampling_hotness = torch.zeros(self.indptr.numel() - 1, device='cpu')
