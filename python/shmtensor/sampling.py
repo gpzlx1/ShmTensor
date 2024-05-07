@@ -165,8 +165,11 @@ class GPUSamplingDataloader:
         _, cache_candidates = torch.sort(hotness, descending=True)
 
         # compute size
+        # size = degress[cache_candidates] * self.indices.element_size(
+        # ) + self.indptr.element_size()
         size = degress[cache_candidates] * self.indices.element_size(
-        ) + self.indptr.element_size()
+        ) + self.indptr.element_size(
+        ) + 1.25 * 2 * 4  # int type for key and value
         prefix_sum_size = torch.cumsum(size, dim=0)
         cache_size = torch.searchsorted(prefix_sum_size, cache_capacity).item()
         cache_candidates = cache_candidates[:cache_size].cuda()
@@ -176,10 +179,10 @@ class GPUSamplingDataloader:
             self.gpu_indptr, self.gpu_indices = capi.create_subcsr(
                 self.indptr, self.indices, cache_candidates)
             self.hashmap = capi.CUCOStaticHashmap(
-                cache_candidates,
+                cache_candidates.int(),
                 torch.arange(cache_candidates.numel(),
                              device='cuda',
-                             dtype=cache_candidates.dtype), 0.8)
+                             dtype=torch.int32), 0.8)
             self.has_cache = True
             print("Cache Ratio for GPU sampling: {:.2f}".format(
                 prefix_sum_size[cache_size].item() / full_size))
