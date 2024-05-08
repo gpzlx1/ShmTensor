@@ -226,3 +226,12 @@ class GPUSamplingDataloader:
             feature_hotness = feature_hotness.cpu()
 
         return sampling_hotness, feature_hotness
+
+    def compute_weight_size(self, hotness):
+        full_size = self.indptr.nbytes + self.indices.nbytes
+        degree = (self.indptr[1:] - self.indptr[:-1]).clip(
+            max=self.num_picks[0] * 1.3).float().cpu()
+        item_size = (degree[hotness > 0] * self.indices.element_size() +
+                     self.indptr.element_size()) * hotness[hotness > 0]
+        item_size = item_size.mean().item()
+        return full_size, item_size
