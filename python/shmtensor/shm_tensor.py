@@ -4,6 +4,7 @@ import ShmTensorLib as capi
 import weakref
 
 itemsize = {
+    torch.float16: 2,
     torch.float32: 4,
     torch.float64: 8,
     torch.int16: 2,
